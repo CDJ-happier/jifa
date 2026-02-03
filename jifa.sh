@@ -14,6 +14,7 @@ set -eu
 
 TAG="latest"
 PORT="8102"
+DATA_DIR="/data/jifa-storage"
 MOUNTS=""
 INPUT_FILES=""
 INPUT_FILE_COUNT=0
@@ -26,9 +27,52 @@ check_docker() {
   fi
 }
 
+setup_data_dir() {
+  if [ -z "$DATA_DIR" ]; then
+    # 使用默认数据目录
+    DATA_DIR="$HOME/jifa-storage"
+    echo "Using default data directory: $DATA_DIR"
+  fi
+  
+  # 创建数据目录（如果不存在）
+  if [ ! -d "$DATA_DIR" ]; then
+    echo "Creating data directory: $DATA_DIR"
+    mkdir -p "$DATA_DIR"
+  fi
+  
+  # 创建日志目录（如果不存在）
+  LOGS_DIR="$DATA_DIR/logs"
+  if [ ! -d "$LOGS_DIR" ]; then
+    echo "Creating logs directory: $LOGS_DIR"
+    mkdir -p "$LOGS_DIR"
+  fi
+  
+  # 检查目录权限
+  if [ ! -w "$DATA_DIR" ]; then
+    echo "Error: Data directory $DATA_DIR is not writable"
+    exit 1
+  fi
+  
+  if [ ! -w "$LOGS_DIR" ]; then
+    echo "Error: Logs directory $LOGS_DIR is not writable"
+    exit 1
+  fi
+}
+
 launch_jifa() {
   check_docker
-  docker run --pull=always -e JDK_JAVA_OPTIONS="$JVM_OPTIONS" -p ${PORT}:${PORT} $MOUNTS eclipsejifa/jifa:${TAG} --jifa.port=${PORT} $INPUT_FILES
+  setup_data_dir
+  
+  # 添加数据目录挂载和配置
+  DATA_MOUNT="-v $DATA_DIR:/jifa-storage"
+  DATA_CONFIG="--jifa.storage-path=/jifa-storage"
+  
+  # 为72核256G服务器优化JVM配置（如果用户没有自定义JVM选项）
+  if [ -z "$JVM_OPTIONS" ]; then
+    JVM_OPTIONS="-Xmx180g -Xms180g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=32m -XX:ParallelGCThreads=36 -XX:ConcGCThreads=12 -XX:G1ReservePercent=15 -XX:InitiatingHeapOccupancyPercent=45 -Dspring.servlet.multipart.max-file-size=128GB -Dspring.servlet.multipart.max-request-size=128GB -XX:+UnlockExperimentalVMOptions -XX:+UseNUMA -XX:+UseLargePages -XX:+UseTransparentHugePages -XX:+AlwaysPreTouch -XX:+UseStringDeduplication -Xlog:gc:file=/jifa-storage/logs/gc.log:time,level,tags"
+  fi
+  
+  docker run --pull=always -e JDK_JAVA_OPTIONS="$JVM_OPTIONS" -p ${PORT}:${PORT} $DATA_MOUNT $MOUNTS eclipsejifa/jifa:${TAG} --jifa.port=${PORT} $DATA_CONFIG $INPUT_FILES
 }
 
 while [ $# -gt 0 ]; do
@@ -39,6 +83,10 @@ while [ $# -gt 0 ]; do
     ;;
   -p)
     PORT=$2
+    shift
+    ;;
+  -d|--data-dir)
+    DATA_DIR=$2
     shift
     ;;
   --jvm-options)
