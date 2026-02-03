@@ -1,0 +1,60 @@
+# Jifa Production Configuration
+# 将此文件复制到 /data/jifa-config/application.yml
+
+jifa:
+  role: standalone-worker
+  # 数据存储路径（使用数据盘）
+  storage-path: /data/jifa/storage
+  # 数据库配置（如果需要集群模式）
+  database-host: ${MYSQL_HOST:}
+  database-name: ${MYSQL_DATABASE:jifa}
+  database-user: ${MYSQL_USER:jifa}
+  database-password: ${MYSQL_PASSWORD:jifa}
+  disabled-file-transfer-methods: [ scp ]
+
+spring:
+  servlet:
+    multipart:
+      # 支持最大 128GB 文件上传
+      max-request-size: 128GB
+      max-file-size: 128GB
+      # 文件上传临时目录
+      location: /data/jifa/storage/temp
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    open-in-view: false
+  task:
+    scheduling:
+      pool:
+        size: 36
+
+server:
+  # 服务端口
+  port: 8102
+  tomcat:
+    # 最大线程数
+    threads:
+      max: 500
+      min-spare: 50
+    # 最大连接数
+    max-connections: 10000
+    # 接受队列大小
+    accept-count: 1000
+    relaxed-query-chars:
+      - '['
+      - ']'
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    org.eclipse.jifa: INFO
+  file:
+    name: /data/jifa/logs/jifa.log
+  logback:
+    rollingpolicy:
+      max-file-size: 100MB
+      max-history: 30
+      total-size-cap: 10GB
