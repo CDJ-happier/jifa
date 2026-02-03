@@ -69,14 +69,6 @@ check_dependencies() {
 check_service() {
     log_info "检查 Jifa 服务连接 (${JIFA_BASE_URL})..." >&2
 
-    # Try actuator health check first (at root level, not under /jifa-api)
-    local health_url="http://${JIFA_HOST}:${JIFA_PORT}/actuator/health"
-    if curl -sf "$health_url" > /dev/null 2>&1; then
-        log_success "Jifa 服务连接正常" >&2
-        return 0
-    fi
-
-    # Fallback: try to query files API
     local response
     response=$(curl -sf -G "${JIFA_BASE_URL}/files" \
         --data-urlencode "type=HEAP_DUMP" \
