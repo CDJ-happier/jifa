@@ -6,6 +6,7 @@
 
 ### 🚀 快速开始
 - [README.md](README.md) - 快速部署指南（推荐从这里开始）
+- [QUICKSTART_AUTOMATION.md](QUICKSTART_AUTOMATION.md) - 自动化分析快速指南 🔥
 
 ### 📖 详细文档
 - [DEPLOYMENT.md](DEPLOYMENT.md) - 完整部署步骤和配置说明
@@ -13,6 +14,8 @@
 - [CONFIGURATION_PRIORITY.md](CONFIGURATION_PRIORITY.md) - 配置优先级和生效说明 ⭐
 - [DIRECTORY_STRUCTURE.md](DIRECTORY_STRUCTURE.md) - 目录结构说明
 - [SUMMARY.md](SUMMARY.md) - 部署总结和验证清单
+- [API_REFERENCE.md](API_REFERENCE.md) - Heap Dump API 完整参考文档 🔥
+- [CLEANUP_GUIDE.md](CLEANUP_GUIDE.md) - 文件自动清理指南 🧹
 
 ### 📂 配置文件
 - [config/application-production.yml](config/application-production.yml) - 生产环境配置（128GB 上传）
@@ -21,6 +24,8 @@
 - [scripts/deploy.sh](scripts/deploy.sh) - 自动部署脚本
 - [scripts/start-jifa.sh](scripts/start-jifa.sh) - 启动脚本模板
 - [scripts/verify.sh](scripts/verify.sh) - 部署验证脚本
+- [/opt/jifa/scripts/auto-analyze-heap-dump.sh](/opt/jifa/scripts/auto-analyze-heap-dump.sh) - 自动化 Heap Dump 分析脚本 ⭐
+- [/opt/jifa/scripts/cleanup-old-files.sh](/opt/jifa/scripts/cleanup-old-files.sh) - 文件清理脚本 🧹
 
 ### ⚙️ 系统集成
 - [systemd/jifa.service](systemd/jifa.service) - systemd 服务配置

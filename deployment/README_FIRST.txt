@@ -15,9 +15,11 @@
 
 1️⃣  INDEX.md                     - 文档索引（从这里开始）
 2️⃣  QUICK_REFERENCE.md           - 快速参考卡片
-3️⃣  CONFIGURATION_PRIORITY.md    - 配置优先级说明 ⭐
-4️⃣  JAVA_SETUP.md                - Java 环境配置详解
-5️⃣  SUMMARY.md                   - 部署总结
+3️⃣  QUICKSTART_AUTOMATION.md     - 自动化分析快速指南 🔥
+4️⃣  API_REFERENCE.md             - API 完整参考文档 📚
+5️⃣  CONFIGURATION_PRIORITY.md    - 配置优先级说明 ⭐
+6️⃣  JAVA_SETUP.md                - Java 环境配置详解
+7️⃣  SUMMARY.md                   - 部署总结
 
 ════════════════════════════════════════════════════════════
 

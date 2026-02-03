@@ -1,0 +1,428 @@
+#!/bin/bash
+# Jifa 自动 Heap Dump 分析脚本
+#
+# 功能：
+# 1. 从 URL 下载并上传 heap dump 文件
+# 2. 轮询上传进度直到完成
+# 3. 自动触发 heap dump 分析
+# 4. 轮询分析进度直到完成
+# 5. 输出最终结果
+#
+# 使用方法：
+#   bash auto-analyze-heap-dump.sh <heap-dump-url>
+#
+# 示例：
+#   bash auto-analyze-heap-dump.sh "https://example.com/dump.hprof"
+
+set -e
+
+# ============================================================
+# 配置部分
+# ============================================================
+
+JIFA_HOST="${JIFA_HOST:-localhost}"
+JIFA_PORT="${JIFA_PORT:-8080}"
+JIFA_BASE_URL="http://${JIFA_HOST}:${JIFA_PORT}/jifa-api"
+
+# 轮询配置
+POLL_INTERVAL=5  # 轮询间隔（秒）
+MAX_WAIT=3600    # 最大等待时间（秒）
+
+# 颜色输出
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# ============================================================
+# 工具函数
+# ============================================================
+
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 检查必要的命令
+check_dependencies() {
+    local missing_deps=()
+
+    for cmd in curl jq; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing_deps+=("$cmd")
+        fi
+    done
+
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        log_error "缺少必要的依赖: ${missing_deps[*]}"
+        log_info "请安装缺失的依赖："
+        log_info "  CentOS/RHEL: sudo yum install -y curl jq"
+        log_info "  Ubuntu/Debian: sudo apt-get install -y curl jq"
+        exit 1
+    fi
+}
+
+# 检查 Jifa 服务是否可用
+check_jifa_service() {
+    log_info "检查 Jifa 服务连接..."
+
+    if ! curl -s -f "${JIFA_BASE_URL}/files?type=HEAP_DUMP&page=1&pageSize=1" > /dev/null 2>&1; then
+        log_error "无法连接到 Jifa 服务: ${JIFA_BASE_URL}"
+        log_info "请检查："
+        log_info "  1. Jifa 服务是否正在运行: sudo systemctl status jifa"
+        log_info "  2. 服务地址是否正确: ${JIFA_BASE_URL}"
+        exit 1
+    fi
+
+    log_success "Jifa 服务连接正常"
+}
+
+# ============================================================
+# 核心功能
+# ============================================================
+
+# 步骤1: 上传文件
+upload_file() {
+    local url="$1"
+
+    log_info "步骤1: 发起文件上传..." >&2
+    log_info "URL: $url" >&2
+
+    local response
+    response=$(curl -s -X POST "${JIFA_BASE_URL}/files/transfer" \
+        -H "Content-Type: application/json" \
+        -d "{\"type\":\"HEAP_DUMP\",\"method\":\"URL\",\"url\":\"${url}\"}")
+
+    # 检查是否有错误
+    if echo "$response" | jq -e '.errorCode' > /dev/null 2>&1; then
+        local error_msg
+        error_msg=$(echo "$response" | jq -r '.message')
+        log_error "上传失败: $error_msg" >&2
+        exit 1
+    fi
+
+    # 返回的是纯数字 transferId
+    local transfer_id="$response"
+
+    if [ -z "$transfer_id" ] || [ "$transfer_id" = "null" ]; then
+        log_error "无法获取 transfer ID" >&2
+        echo "Response: $response" >&2
+        exit 1
+    fi
+
+    log_success "文件上传已发起，Transfer ID: $transfer_id" >&2
+    echo "$transfer_id"
+}
+
+# 步骤2: 轮询上传进度
+wait_for_transfer() {
+    local transfer_id="$1"
+    local start_time elapsed_time
+
+    start_time=$(date +%s)
+
+    log_info "步骤2: 等待文件上传完成..." >&2
+
+    while true; do
+        elapsed_time=$(($(date +%s) - start_time))
+
+        if [ $elapsed_time -gt $MAX_WAIT ]; then
+            log_error "上传超时（超过 ${MAX_WAIT} 秒）" >&2
+            exit 1
+        fi
+
+        local response
+        response=$(curl -s "${JIFA_BASE_URL}/files/transfer/${transfer_id}")
+
+        # 检查是否有错误
+        if echo "$response" | jq -e '.errorCode' > /dev/null 2>&1; then
+            local error_msg
+            error_msg=$(echo "$response" | jq -r '.message')
+            log_error "查询上传进度失败: $error_msg" >&2
+            exit 1
+        fi
+
+        local state
+        state=$(echo "$response" | jq -r '.state')
+
+        case "$state" in
+            "SUCCESS")
+                local total_size transferred_size file_id
+                total_size=$(echo "$response" | jq -r '.totalSize')
+                transferred_size=$(echo "$response" | jq -r '.transferredSize')
+                file_id=$(echo "$response" | jq -r '.fileId')
+
+                log_success "文件上传完成！" >&2
+                log_info "  文件大小: $(numfmt --to=iec --format='%.2f' $total_size 2>/dev/null || echo $total_size)" >&2
+                log_info "  File ID: $file_id" >&2
+
+                echo "$file_id"
+                return 0
+                ;;
+
+            "IN_PROGRESS")
+                local total_size transferred_size percent
+                total_size=$(echo "$response" | jq -r '.totalSize')
+                transferred_size=$(echo "$response" | jq -r '.transferredSize')
+
+                if [ "$total_size" != "null" ] && [ "$total_size" -gt 0 ]; then
+                    percent=$((transferred_size * 100 / total_size))
+                    log_info "  上传进度: ${percent}% ($(numfmt --to=iec --format='%.2f' $transferred_size 2>/dev/null || echo $transferred_size) / $(numfmt --to=iec --format='%.2f' $total_size 2>/dev/null || echo $total_size))" >&2
+                else
+                    log_info "  上传中... (已传输: $transferred_size 字节)" >&2
+                fi
+                ;;
+
+            "FAILED")
+                log_error "文件上传失败" >&2
+                local message
+                message=$(echo "$response" | jq -r '.message // "未知错误"')
+                log_error "失败原因: $message" >&2
+                exit 1
+                ;;
+
+            *)
+                log_warn "未知状态: $state" >&2
+                ;;
+        esac
+
+        sleep $POLL_INTERVAL
+    done
+}
+
+# 步骤3: 获取文件的 uniqueName
+get_file_unique_name() {
+    local file_id="$1"
+
+    log_info "步骤3: 获取文件信息..." >&2
+
+    # 方法1: 直接通过 file_id 查询（如果 API 支持）
+    # 方法2: 通过列表查询最新的文件
+
+    local response
+    response=$(curl -s "${JIFA_BASE_URL}/files" \
+        -G \
+        --data-urlencode "type=HEAP_DUMP" \
+        --data-urlencode "page=1" \
+        --data-urlencode "pageSize=25")
+
+    # 检查是否有错误
+    if echo "$response" | jq -e '.errorCode' > /dev/null 2>&1; then
+        local error_msg
+        error_msg=$(echo "$response" | jq -r '.message')
+        log_error "查询文件列表失败: $error_msg" >&2
+        exit 1
+    fi
+
+    # 查找对应的 file_id
+    local unique_name original_name
+    unique_name=$(echo "$response" | jq -r ".data[] | select(.id == $file_id) | .uniqueName")
+    original_name=$(echo "$response" | jq -r ".data[] | select(.id == $file_id) | .originalName")
+
+    if [ -z "$unique_name" ] || [ "$unique_name" = "null" ]; then
+        log_error "无法找到 File ID $file_id 对应的文件" >&2
+        exit 1
+    fi
+
+    log_success "文件信息获取成功" >&2
+    log_info "  Unique Name: $unique_name" >&2
+    log_info "  原始文件名: $original_name" >&2
+
+    echo "$unique_name"
+}
+
+# 步骤4: 触发 heap dump 分析
+trigger_analysis() {
+    local unique_name="$1"
+
+    log_info "步骤4: 触发 heap dump 分析..." >&2
+
+    local response
+    response=$(curl -s -X POST "${JIFA_BASE_URL}/analysis" \
+        -H "Content-Type: application/json" \
+        -d "{\"namespace\":\"heap-dump\",\"api\":\"analyze\",\"target\":\"${unique_name}\",\"parameters\":{}}")
+
+    # 检查是否有错误
+    if echo "$response" | jq -e '.errorCode' > /dev/null 2>&1; then
+        local error_msg
+        error_msg=$(echo "$response" | jq -r '.message')
+        log_error "触发分析失败: $error_msg" >&2
+        exit 1
+    fi
+
+    log_success "Heap dump 分析已启动" >&2
+}
+
+# 步骤5: 轮询分析进度
+wait_for_analysis() {
+    local unique_name="$1"
+    local start_time elapsed_time
+
+    start_time=$(date +%s)
+
+    log_info "步骤5: 等待分析完成..." >&2
+
+    while true; do
+        elapsed_time=$(($(date +%s) - start_time))
+
+        if [ $elapsed_time -gt $MAX_WAIT ]; then
+            log_error "分析超时（超过 ${MAX_WAIT} 秒）" >&2
+            exit 1
+        fi
+
+        local response
+        response=$(curl -s -X POST "${JIFA_BASE_URL}/analysis" \
+            -H "Content-Type: application/json" \
+            -d "{\"namespace\":\"heap-dump\",\"api\":\"progressOfAnalysis\",\"target\":\"${unique_name}\"}")
+
+        # 检查是否有错误
+        if echo "$response" | jq -e '.errorCode' > /dev/null 2>&1; then
+            local error_msg
+            error_msg=$(echo "$response" | jq -r '.message')
+            log_error "查询分析进度失败: $error_msg" >&2
+            exit 1
+        fi
+
+        local state
+        state=$(echo "$response" | jq -r '.state')
+
+        case "$state" in
+            "SUCCESS")
+                log_success "Heap dump 分析完成！" >&2
+                return 0
+                ;;
+
+            "IN_PROGRESS")
+                local percent message
+                percent=$(echo "$response" | jq -r '.percent // 0')
+                message=$(echo "$response" | jq -r '.message // "分析中..."')
+
+                # percent 是 0-1 之间的小数，转换为百分比
+                local percent_int
+                percent_int=$(echo "$percent * 100" | bc 2>/dev/null || echo "0")
+
+                log_info "  分析进度: ${percent_int}% - ${message}" >&2
+                ;;
+
+            "FAILURE")
+                log_error "Heap dump 分析失败" >&2
+                local message
+                message=$(echo "$response" | jq -r '.message // "未知错误"')
+                log_error "失败原因: $message" >&2
+                exit 1
+                ;;
+
+            *)
+                log_warn "未知状态: $state" >&2
+                ;;
+        esac
+
+        sleep $POLL_INTERVAL
+    done
+}
+
+# 步骤6: 输出访问信息（不再调用 getDetails API）
+output_result() {
+    local file_id="$1"
+    local unique_name="$2"
+
+    echo "" >&2
+    log_success "==========================================" >&2
+    log_success "分析完成！可以通过以下方式访问：" >&2
+    log_success "==========================================" >&2
+    echo "" >&2
+    echo "Web UI:" >&2
+    echo "  http://${JIFA_HOST}:${JIFA_PORT}/#/heap/${unique_name}" >&2
+    echo "" >&2
+    echo "常用 API 示例:" >&2
+    echo "" >&2
+    echo "  # 获取泄漏报告" >&2
+    echo "  curl -X POST '${JIFA_BASE_URL}/analysis' -H 'Content-Type: application/json' -d '{\"namespace\":\"heap-dump\",\"api\":\"leak.report\",\"target\":\"${unique_name}\"}'" >&2
+    echo "" >&2
+    echo "  # 获取线程摘要" >&2
+    echo "  curl -X POST '${JIFA_BASE_URL}/analysis' -H 'Content-Type: application/json' -d '{\"namespace\":\"heap-dump\",\"api\":\"threadsSummary\",\"target\":\"${unique_name}\",\"parameters\":{\"searchText\":\"\",\"searchType\":\"BY_NAME\"}}'" >&2
+    echo "" >&2
+    echo "  # 获取直方图（按类分组，按保留大小排序）" >&2
+    echo "  curl -X POST '${JIFA_BASE_URL}/analysis' -H 'Content-Type: application/json' -d '{\"namespace\":\"heap-dump\",\"api\":\"getHistogram\",\"target\":\"${unique_name}\",\"parameters\":{\"groupBy\":\"BY_CLASS\",\"ids\":[],\"sortBy\":\"retainedSize\",\"ascendingOrder\":false,\"searchText\":\"\",\"searchType\":\"BY_NAME\",\"page\":1,\"pageSize\":50}}'" >&2
+    echo "" >&2
+    echo "  # 获取支配树根节点" >&2
+    echo "  curl -X POST '${JIFA_BASE_URL}/analysis' -H 'Content-Type: application/json' -d '{\"namespace\":\"heap-dump\",\"api\":\"dominatorTree.roots\",\"target\":\"${unique_name}\",\"parameters\":{\"groupBy\":\"NONE\",\"sortBy\":\"retainedSize\",\"ascendingOrder\":false,\"searchText\":\"\",\"searchType\":\"BY_NAME\",\"page\":1,\"pageSize\":50}}'" >&2
+    echo "" >&2
+    log_info "File ID: $file_id" >&2
+    log_info "Unique Name: $unique_name" >&2
+    echo "" >&2
+}
+
+# ============================================================
+# 主流程
+# ============================================================
+
+main() {
+    local heap_dump_url="$1"
+
+    # 检查参数
+    if [ -z "$heap_dump_url" ]; then
+        log_error "缺少必要参数: heap-dump-url"
+        echo ""
+        echo "使用方法："
+        echo "  bash $0 <heap-dump-url>"
+        echo ""
+        echo "示例："
+        echo "  bash $0 'https://example.com/dump.hprof'"
+        echo ""
+        echo "环境变量："
+        echo "  JIFA_HOST    - Jifa 服务地址 (默认: localhost)"
+        echo "  JIFA_PORT    - Jifa 服务端口 (默认: 8080)"
+        echo ""
+        exit 1
+    fi
+
+    echo ""
+    log_info "=========================================="
+    log_info "Jifa 自动 Heap Dump 分析"
+    log_info "=========================================="
+    echo ""
+
+    # 检查依赖
+    check_dependencies
+
+    # 检查服务
+    check_jifa_service
+
+    echo ""
+
+    # 执行完整流程
+    local transfer_id file_id unique_name
+
+    transfer_id=$(upload_file "$heap_dump_url")
+    echo ""
+
+    file_id=$(wait_for_transfer "$transfer_id")
+    echo ""
+
+    unique_name=$(get_file_unique_name "$file_id")
+    echo ""
+
+    trigger_analysis "$unique_name"
+    echo ""
+
+    wait_for_analysis "$unique_name"
+    echo ""
+
+    output_result "$file_id" "$unique_name"
+}
+
+# 执行主流程
+main "$@"
