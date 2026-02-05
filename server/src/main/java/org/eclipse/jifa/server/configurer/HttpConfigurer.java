@@ -74,7 +74,11 @@ public class HttpConfigurer extends ConfigurationAccessor implements WebMvcConfi
     @Bean
     TomcatServletWebServerFactory tomcatServletWebServerFactory() {
         TomcatServletWebServerFactory tomcatServletWebServerFactory = new TomcatServletWebServerFactory();
-        tomcatServletWebServerFactory.addConnectorCustomizers(connector -> connector.setAsyncTimeout(-1));
+        tomcatServletWebServerFactory.addConnectorCustomizers(connector -> {
+            connector.setAsyncTimeout(-1);
+            // 文件上传大小限制已在application.yml中通过spring.servlet.multipart配置
+            // 无需在此处手动设置MaxPostSize和MaxSwallowSize
+        });
         return tomcatServletWebServerFactory;
     }
 
