@@ -157,6 +157,21 @@ public class Configuration {
     private Path[] inputFiles;
 
     /**
+     * Local dump files directory path to scan for files on startup
+     */
+    private Path localDumpFilesDirectory;
+
+    /**
+     * Whether to use symbolic link instead of copying files from local dump files directory
+     */
+    private boolean useSymbolicLinkForLocalFiles = true;
+
+    /**
+     * Scan interval in seconds for local dump files directory (0 means no periodic scan, only scan on startup)
+     */
+    private int localDumpFilesScanInterval = 300;
+
+    /**
      * Whether to open browser when server is ready
      */
     private boolean openBrowserWhenReady;

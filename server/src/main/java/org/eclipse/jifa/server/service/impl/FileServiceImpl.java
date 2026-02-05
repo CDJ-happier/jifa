@@ -261,12 +261,21 @@ public class FileServiceImpl extends ConfigurationAccessor implements FileServic
 
     @Override
     public String handleLocalFileRequest(FileType type, Path path) throws IOException {
+        return handleLocalFileRequest(type, path, false);
+    }
+
+    @Override
+    public String handleLocalFileRequest(FileType type, Path path, boolean useSymlink) throws IOException {
         mustBe(STANDALONE_WORKER);
 
         Validate.isTrue(Files.exists(path) && Files.isRegularFile(path));
 
         String uniqueName = generateFileUniqueName();
-        storageService.handleLocalFile(type, path, uniqueName);
+        if (useSymlink) {
+            storageService.handleLocalFileWithSymlink(type, path, uniqueName);
+        } else {
+            storageService.handleLocalFile(type, path, uniqueName);
+        }
 
         FileEntity newFile = new FileEntity();
         File file = path.toFile();
@@ -277,6 +286,17 @@ public class FileServiceImpl extends ConfigurationAccessor implements FileServic
         fileRepo.save(newFile);
 
         return uniqueName;
+    }
+
+    @Override
+    public boolean isFileAlreadyLoaded(String originalName, FileType type) {
+        mustBe(STANDALONE_WORKER);
+        for (FileEntity f : fileRepo.findAll()) {
+            if (f.getOriginalName().equals(originalName) && f.getType() == type) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

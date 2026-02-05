@@ -44,6 +44,10 @@ public interface FileService {
 
     String handleLocalFileRequest(FileType type, Path path) throws IOException;
 
+    String handleLocalFileRequest(FileType type, Path path, boolean useSymlink) throws IOException;
+
+    boolean isFileAlreadyLoaded(String originalName, FileType type);
+
     NamedResource handleDownloadRequest(long fileId) throws Throwable;
 
     FileEntity getFileByUniqueName(String uniqueName, FileType expectedFileType);

@@ -194,6 +194,19 @@ public class StorageServiceImpl extends ConfigurationAccessor implements Storage
     }
 
     @Override
+    public void handleLocalFileWithSymlink(FileType type, Path path, String destFilename) throws IOException {
+        Validate.isTrue(available, CommonErrorCode.INTERNAL_ERROR);
+        Path destination = provision(type, destFilename);
+        try {
+            // Create symbolic link instead of copying
+            Files.createSymbolicLink(destination, path.toAbsolutePath());
+        } catch (IOException e) {
+            scavenge(type, destFilename);
+            throw e;
+        }
+    }
+
+    @Override
     public Path locationOf(FileType type, String name) {
         Validate.isTrue(available, CommonErrorCode.INTERNAL_ERROR);
         return basePath.resolve(type.getStorageDirectoryName()).resolve(name).resolve(name);

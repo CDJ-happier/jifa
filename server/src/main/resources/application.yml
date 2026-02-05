@@ -11,6 +11,11 @@
 jifa:
   role: standalone-worker
   storage-path: ${user.home}/jifa-storage
+  local-dump-files-directory: /data/dump_files
+  # Use symbolic link instead of copying files (saves disk space)
+  use-symbolic-link-for-local-files: true
+  # Scan interval in seconds (0 = only scan on startup, default 300s = 5min)
+  local-dump-files-scan-interval: 300
   database-host: ${MYSQL_HOST:}
   database-name: ${MYSQL_DATABASE:jifa}
   database-user: ${MYSQL_USER:jifa}

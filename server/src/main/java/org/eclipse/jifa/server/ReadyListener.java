@@ -18,6 +18,7 @@ import org.eclipse.jifa.server.enums.FileType;
 import org.eclipse.jifa.server.enums.Role;
 import org.eclipse.jifa.server.service.AnalysisApiService;
 import org.eclipse.jifa.server.service.FileService;
+import org.eclipse.jifa.server.service.LocalDumpFilesScanner;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -33,9 +34,12 @@ class ReadyListener extends ConfigurationAccessor {
 
     private final FileService fileService;
 
-    ReadyListener(AnalysisApiService analysisApiService, FileService fileService) {
+    private final LocalDumpFilesScanner localDumpFilesScanner;
+
+    ReadyListener(AnalysisApiService analysisApiService, FileService fileService, LocalDumpFilesScanner localDumpFilesScanner) {
         this.analysisApiService = analysisApiService;
         this.fileService = fileService;
+        this.localDumpFilesScanner = localDumpFilesScanner;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -47,30 +51,43 @@ class ReadyListener extends ConfigurationAccessor {
         }
 
         if (config.getRole() == Role.STANDALONE_WORKER) {
+            // Handle individual input files
             Path[] paths = config.getInputFiles();
             if (paths != null) {
                 for (Path path : paths) {
-                    try {
-                        FileType type = analysisApiService.deduceFileType(path);
-                        if (type != null) {
-                            String uniqueName = fileService.handleLocalFileRequest(type, path);
-                            //noinspection HttpUrlsUsage
-                            log.info("{}: http://{}:{}/{}/{}",
-                                     path.getFileName(),
-                                     "localhost",
-                                     config.getPort(),
-                                     type.getAnalysisUrlPath(),
-                                     uniqueName);
-                        }
-                    } catch (IOException e) {
-                        log.error("Failed to handle input file '{}': {}", path, e.getMessage());
-                    }
+                    handleInputFile(path);
                 }
+            }
+
+            // Handle local dump files directory - use the scanner service
+            Path dumpFilesDir = config.getLocalDumpFilesDirectory();
+            if (dumpFilesDir != null) {
+                localDumpFilesScanner.scanDirectory(dumpFilesDir);
             }
 
             if (config.isOpenBrowserWhenReady()) {
                 openBrowser("http://localhost:" + config.getPort());
             }
+        }
+    }
+
+    private void handleInputFile(Path path) {
+        try {
+            FileType type = analysisApiService.deduceFileType(path);
+            if (type != null) {
+                String uniqueName = fileService.handleLocalFileRequest(type, path);
+                //noinspection HttpUrlsUsage
+                log.info("{}: http://{}:{}/{}/{}",
+                         path.getFileName(),
+                         "localhost",
+                         config.getPort(),
+                         type.getAnalysisUrlPath(),
+                         uniqueName);
+            } else {
+                log.warn("Unable to deduce file type for: {}", path);
+            }
+        } catch (IOException e) {
+            log.error("Failed to handle input file '{}': {}", path, e.getMessage());
         }
     }
 

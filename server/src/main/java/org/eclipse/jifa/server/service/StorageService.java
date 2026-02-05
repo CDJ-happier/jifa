@@ -34,6 +34,8 @@ public interface StorageService {
 
     void handleLocalFile(FileType type, Path path, String destFilename) throws IOException;
 
+    void handleLocalFileWithSymlink(FileType type, Path path, String destFilename) throws IOException;
+
     void scavenge(FileType type, String name);
 
     Path locationOf(FileType type, String name);
