@@ -154,10 +154,23 @@ public class AnalysisApiServiceImpl extends ConfigurationAccessor implements Ana
         byte[] content = new byte[(int) Math.min(file.length(), 16 * 1024)];
 
         try {
-            try (FileInputStream input = new FileInputStream(file)) {
-                //noinspection ResultOfMethodCallIgnored
-                input.read(content);
+            // Check if file is gzip compressed
+            boolean isGzipped = path.getFileName().toString().toLowerCase().endsWith(".gz");
+
+            if (isGzipped) {
+                // Read from gzip stream
+                try (java.util.zip.GZIPInputStream gzis = new java.util.zip.GZIPInputStream(new FileInputStream(file))) {
+                    //noinspection ResultOfMethodCallIgnored
+                    gzis.read(content);
+                }
+            } else {
+                // Read directly
+                try (FileInputStream input = new FileInputStream(file)) {
+                    //noinspection ResultOfMethodCallIgnored
+                    input.read(content);
+                }
             }
+
             String namespace = apiService.deduceNamespaceByContent(content);
             if (namespace == null) {
                 log.warn("Failed to deduce the type of file '{}'", path);

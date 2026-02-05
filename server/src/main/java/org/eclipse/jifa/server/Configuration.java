@@ -172,6 +172,11 @@ public class Configuration {
     private int localDumpFilesScanInterval = 300;
 
     /**
+     * Whether to use file watcher for real-time monitoring instead of periodic scanning
+     */
+    private boolean useFileWatcher = true;
+
+    /**
      * Whether to open browser when server is ready
      */
     private boolean openBrowserWhenReady;

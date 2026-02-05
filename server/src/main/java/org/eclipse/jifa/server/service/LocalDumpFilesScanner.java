@@ -19,16 +19,11 @@ import org.eclipse.jifa.server.enums.Role;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
-import java.util.zip.GZIPInputStream;
 
 @Service
 @Slf4j
@@ -46,6 +41,11 @@ public class LocalDumpFilesScanner extends ConfigurationAccessor {
     @Scheduled(fixedDelayString = "${jifa.local-dump-files-scan-interval:300}", timeUnit = TimeUnit.SECONDS, initialDelay = 10)
     public void scheduledScan() {
         if (config.getRole() != Role.STANDALONE_WORKER) {
+            return;
+        }
+
+        // Skip periodic scan if FileWatcher is enabled
+        if (config.isUseFileWatcher()) {
             return;
         }
 
@@ -95,42 +95,19 @@ public class LocalDumpFilesScanner extends ConfigurationAccessor {
     private void handleInputFile(Path path) {
         try {
             String fileName = path.getFileName().toString();
-            boolean isGzipped = fileName.toLowerCase().endsWith(".gz");
 
-            Path fileToAnalyze = path;
-            Path tempUncompressedFile = null;
-
-            // Handle .gz files for heap dumps only
-            if (isGzipped && fileName.toLowerCase().contains(".hprof")) {
-                String uncompressedName = fileName.substring(0, fileName.length() - 3); // Remove .gz
-
-                // Check if already loaded (check uncompressed name)
-                FileType estimatedType = FileType.HEAP_DUMP;
-                if (fileService.isFileAlreadyLoaded(uncompressedName, estimatedType)) {
-                    log.debug("File already loaded, skipping: {}", uncompressedName);
-                    return;
-                }
-
-                log.info("Decompressing .gz file: {}", fileName);
-                tempUncompressedFile = Files.createTempFile("jifa-decompress-", ".hprof");
-                decompressGzFile(path, tempUncompressedFile);
-                fileToAnalyze = tempUncompressedFile;
-
-                // Update file name for later processing
-                fileName = uncompressedName;
-            } else {
-                // Check if already loaded
-                FileType estimatedType = estimateFileType(fileName);
-                if (estimatedType != null && fileService.isFileAlreadyLoaded(fileName, estimatedType)) {
-                    log.debug("File already loaded, skipping: {}", fileName);
-                    return;
-                }
+            // Check if already loaded
+            FileType estimatedType = estimateFileType(fileName);
+            if (estimatedType != null && fileService.isFileAlreadyLoaded(fileName, estimatedType)) {
+                log.debug("File already loaded, skipping: {}", fileName);
+                return;
             }
 
-            FileType type = analysisApiService.deduceFileType(fileToAnalyze);
+            // MAT natively supports .gz files, no need to decompress
+            FileType type = analysisApiService.deduceFileType(path);
             if (type != null) {
-                boolean useSymlink = config.isUseSymbolicLinkForLocalFiles() && !isGzipped;
-                String uniqueName = fileService.handleLocalFileRequest(type, fileToAnalyze, useSymlink);
+                boolean useSymlink = config.isUseSymbolicLinkForLocalFiles();
+                String uniqueName = fileService.handleLocalFileRequest(type, path, useSymlink);
                 log.info("{}: http://{}:{}/{}/{}",
                          fileName,
                          "localhost",
@@ -140,32 +117,19 @@ public class LocalDumpFilesScanner extends ConfigurationAccessor {
             } else {
                 log.warn("Unable to deduce file type for: {}", path);
             }
-
-            // Clean up temp file if it was created
-            if (tempUncompressedFile != null && !config.isUseSymbolicLinkForLocalFiles()) {
-                try {
-                    Files.deleteIfExists(tempUncompressedFile);
-                } catch (IOException e) {
-                    log.warn("Failed to delete temp file: {}", tempUncompressedFile, e);
-                }
-            }
         } catch (IOException e) {
             log.error("Failed to handle input file '{}': {}", path, e.getMessage(), e);
         }
     }
 
-    private void decompressGzFile(Path gzFile, Path outputFile) throws IOException {
-        try (GZIPInputStream gzis = new GZIPInputStream(
-                new BufferedInputStream(new FileInputStream(gzFile.toFile())));
-             BufferedOutputStream bos = new BufferedOutputStream(
-                new FileOutputStream(outputFile.toFile()))) {
-
-            byte[] buffer = new byte[8192];
-            int len;
-            while ((len = gzis.read(buffer)) > 0) {
-                bos.write(buffer, 0, len);
-            }
+    /**
+     * Handle a single file - exposed for FileWatcher to use
+     */
+    public void handleSingleFile(Path path) {
+        if (!Files.isRegularFile(path) || !isSupportedFile(path)) {
+            return;
         }
+        handleInputFile(path);
     }
 
     private FileType estimateFileType(String fileName) {
