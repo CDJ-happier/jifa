@@ -119,9 +119,10 @@ python3 scripts/jifa_client.py thread-raw-content <uniqueName> --thread-id <id>
 python3 scripts/jifa_client.py thread-content <uniqueName> [--line-no 0] [--line-limit 200]
 
 # Thread Dump interactive deep-dive APIs (drill into threads like the Jifa frontend)
-python3 scripts/jifa_client.py thread-call-site-tree <uniqueName> [--parent-id -1] [--page 1] [--page-size 25]
+python3 scripts/jifa_client.py thread-call-site-tree <uniqueName> [--parent-id 0] [--page 1] [--page-size 25]
 python3 scripts/jifa_client.py thread-threads-of-group <uniqueName> --group <group_name> [--page 1] [--page-size 50]
-python3 scripts/jifa_client.py thread-by-monitor <uniqueName> --address <monitor_address> [--page 1] [--page-size 50]
+python3 scripts/jifa_client.py thread-counts-by-monitor <uniqueName> --monitor-id <id>
+python3 scripts/jifa_client.py thread-by-monitor <uniqueName> --monitor-id <id> --state <PARKING|LOCKED|WAITING_ON|...> [--page 1] [--page-size 50]
 
 # JFR analysis report
 python3 scripts/jifa_client.py jfr-report <uniqueName>

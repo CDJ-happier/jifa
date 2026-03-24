@@ -28,6 +28,28 @@ API_PREFIX = "/jifa-api"
 
 
 # ============================================================================
+# Custom Exceptions
+# ============================================================================
+
+
+class JifaApiError(Exception):
+    """Exception raised when Jifa API returns an error."""
+
+    def __init__(self, message, status_code=None, response_body=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_body = response_body
+
+
+class JifaConnectionError(Exception):
+    """Exception raised when connection to Jifa fails."""
+
+    def __init__(self, message, reason=None):
+        super().__init__(message)
+        self.reason = reason
+
+
+# ============================================================================
 # HTTP Utilities
 # ============================================================================
 
@@ -51,11 +73,9 @@ def http_get(path, params=None):
             return json.loads(data) if data.strip() else None
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        print(f"ERROR: HTTP {e.code} - {body}", file=sys.stderr)
-        sys.exit(1)
+        raise JifaApiError(f"HTTP {e.code} - {body}", e.code, body)
     except urllib.error.URLError as e:
-        print(f"ERROR: Connection failed - {e.reason}", file=sys.stderr)
-        sys.exit(1)
+        raise JifaConnectionError(f"Connection failed - {e.reason}", e.reason)
 
 
 def http_post_json(path, body):
@@ -71,11 +91,9 @@ def http_post_json(path, body):
             return json.loads(resp_data) if resp_data.strip() else None
     except urllib.error.HTTPError as e:
         body_text = e.read().decode("utf-8", errors="replace")
-        print(f"ERROR: HTTP {e.code} - {body_text}", file=sys.stderr)
-        sys.exit(1)
+        raise JifaApiError(f"HTTP {e.code} - {body_text}", e.code, body_text)
     except urllib.error.URLError as e:
-        print(f"ERROR: Connection failed - {e.reason}", file=sys.stderr)
-        sys.exit(1)
+        raise JifaConnectionError(f"Connection failed - {e.reason}", e.reason)
 
 
 def http_delete(path):
@@ -88,8 +106,7 @@ def http_delete(path):
             return json.loads(data) if data.strip() else None
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        print(f"ERROR: HTTP {e.code} - {body}", file=sys.stderr)
-        sys.exit(1)
+        raise JifaApiError(f"HTTP {e.code} - {body}", e.code, body)
 
 
 def http_post_multipart(path, file_path, file_type):
@@ -565,7 +582,10 @@ def cmd_heap_report(args):
 
     print("Fetching thread summary...", file=sys.stderr)
     try:
-        report["threadsSummary"] = analysis_request(ns, "threadsSummary", target)
+        # threadsSummary API requires searchText parameter
+        report["threadsSummary"] = analysis_request(
+            ns, "threadsSummary", target, {"searchText": ""}
+        )
     except Exception:
         report["threadsSummary"] = None
 
@@ -854,19 +874,30 @@ def cmd_thread_threads_of_group(args):
     """Get threads belonging to a specific thread group."""
     ensure_analyzed("thread-dump", args.target)
     params = {
-        "group": args.group,
-        "paging": {"page": args.page, "pageSize": args.page_size},
+        "groupName": args.group,
+        "page": args.page,
+        "pageSize": args.page_size,
     }
     result = analysis_request("thread-dump", "threadsOfGroup", args.target, params)
     output_json(result)
 
 
+def cmd_thread_counts_by_monitor(args):
+    """Get thread counts by monitor state for a specific monitor."""
+    ensure_analyzed("thread-dump", args.target)
+    params = {"id": args.monitor_id}
+    result = analysis_request("thread-dump", "threadCountsByMonitor", args.target, params)
+    output_json(result)
+
+
 def cmd_thread_by_monitor(args):
-    """Get threads associated with a specific monitor."""
+    """Get threads associated with a specific monitor by state."""
     ensure_analyzed("thread-dump", args.target)
     params = {
-        "address": args.address,
-        "paging": {"page": args.page, "pageSize": args.page_size},
+        "id": args.monitor_id,
+        "state": args.state,
+        "page": args.page,
+        "pageSize": args.page_size,
     }
     result = analysis_request("thread-dump", "threadsByMonitor", args.target, params)
     output_json(result)
@@ -948,8 +979,8 @@ def build_parser():
     p_info.add_argument("id_or_name", help="File ID or uniqueName")
 
     # Delete file
-    p_delete = subparsers.add_parser("delete-file", help="Delete a file")
-    p_delete.add_argument("file_id", help="File ID to delete")
+    # p_delete = subparsers.add_parser("delete-file", help="Delete a file")
+    # p_delete.add_argument("file_id", help="File ID to delete")
 
     # Upload text
     p_ut = subparsers.add_parser("upload-text", help="Upload raw text as a file")
@@ -1140,9 +1171,20 @@ def build_parser():
     p_td_grp.add_argument("--page", type=int, default=1)
     p_td_grp.add_argument("--page-size", type=int, default=50)
 
-    p_td_bm = subparsers.add_parser("thread-by-monitor", help="Get threads associated with a monitor")
+    p_td_cbm = subparsers.add_parser("thread-counts-by-monitor", help="Get thread counts by state for a monitor")
+    p_td_cbm.add_argument("target", help="File uniqueName")
+    p_td_cbm.add_argument("--monitor-id", type=int, required=True, help="Monitor ID")
+
+    p_td_bm = subparsers.add_parser("thread-by-monitor", help="Get threads of a monitor by state")
     p_td_bm.add_argument("target", help="File uniqueName")
-    p_td_bm.add_argument("--address", required=True, help="Monitor address")
+    p_td_bm.add_argument("--monitor-id", type=int, required=True, help="Monitor ID")
+    p_td_bm.add_argument("--state", required=True,
+                          choices=["WAITING_ON", "WAITING_TO_RE_LOCK",
+                                   "WAITING_ON_NO_OBJECT_REFERENCE_AVAILABLE",
+                                   "PARKING", "WAITING_ON_CLASS_INITIALIZATION",
+                                   "LOCKED", "WAITING_TO_LOCK",
+                                   "ELIMINATED_SCALAR_REPLACED", "ELIMINATED"],
+                          help="Monitor state (use thread-counts-by-monitor to discover available states)")
     p_td_bm.add_argument("--page", type=int, default=1)
     p_td_bm.add_argument("--page-size", type=int, default=50)
 
@@ -1213,6 +1255,7 @@ COMMAND_MAP = {
     "thread-raw-content": cmd_thread_raw_content,
     "thread-call-site-tree": cmd_thread_call_site_tree,
     "thread-threads-of-group": cmd_thread_threads_of_group,
+    "thread-counts-by-monitor": cmd_thread_counts_by_monitor,
     "thread-by-monitor": cmd_thread_by_monitor,
     "thread-content": cmd_thread_content,
     # JFR
@@ -1231,7 +1274,14 @@ def main():
 
     handler = COMMAND_MAP.get(args.command)
     if handler:
-        handler(args)
+        try:
+            handler(args)
+        except JifaApiError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+        except JifaConnectionError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
         print(f"Unknown command: {args.command}", file=sys.stderr)
         sys.exit(1)

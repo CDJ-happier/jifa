@@ -34,3 +34,7 @@ bin
 .test-temp
 
 .java-version
+
+
+# python
+**/__pycache__/
