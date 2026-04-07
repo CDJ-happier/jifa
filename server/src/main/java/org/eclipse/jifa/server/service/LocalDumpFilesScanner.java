@@ -103,6 +103,10 @@ public class LocalDumpFilesScanner extends ConfigurationAccessor {
                 return;
             }
 
+            // Wait for file to become stable (not being written to)
+            // This prevents scanning files that are still being downloaded
+            waitForFileStable(path);
+
             // MAT natively supports .gz files, no need to decompress
             FileType type = analysisApiService.deduceFileType(path);
             if (type != null) {
@@ -119,6 +123,44 @@ public class LocalDumpFilesScanner extends ConfigurationAccessor {
             }
         } catch (IOException e) {
             log.error("Failed to handle input file '{}': {}", path, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Wait for file to become stable (not being written to).
+     * This ensures that files being downloaded are fully written before processing.
+     */
+    private void waitForFileStable(Path filePath) {
+        try {
+            long lastSize = -1;
+            int stableCount = 0;
+            int maxAttempts = 120; // 120 * 500ms = 60 seconds max wait
+
+            for (int i = 0; i < maxAttempts; i++) {
+                if (!Files.exists(filePath)) {
+                    return;
+                }
+
+                long currentSize = Files.size(filePath);
+                if (currentSize == lastSize) {
+                    stableCount++;
+                    if (stableCount >= 2) {
+                        // File size hasn't changed for 2 consecutive checks
+                        return;
+                    }
+                } else {
+                    stableCount = 0;
+                }
+
+                lastSize = currentSize;
+                Thread.sleep(500); // Wait 500ms between checks
+            }
+
+            log.warn("File may still be being written after {} seconds: {}", maxAttempts * 0.5, filePath);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (IOException e) {
+            log.warn("Failed to check file size: {}", e.getMessage());
         }
     }
 
