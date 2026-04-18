@@ -107,6 +107,18 @@ public class LocalDumpFilesScanner extends ConfigurationAccessor {
             // This prevents scanning files that are still being downloaded
             waitForFileStable(path);
 
+            // Skip files with size 0 - they are likely still being downloaded
+            try {
+                long fileSize = Files.size(path);
+                if (fileSize == 0) {
+                    log.warn("File {} has size 0, skipping (likely still being downloaded)", fileName);
+                    return;
+                }
+            } catch (IOException e) {
+                log.warn("Cannot read file size for {}, skipping", fileName);
+                return;
+            }
+
             // MAT natively supports .gz files, no need to decompress
             FileType type = analysisApiService.deduceFileType(path);
             if (type != null) {
@@ -128,13 +140,23 @@ public class LocalDumpFilesScanner extends ConfigurationAccessor {
 
     /**
      * Wait for file to become stable (not being written to).
-     * This ensures that files being downloaded are fully written before processing.
+     * Uses longer intervals and more attempts to handle very large file downloads
+     * (e.g. 80GB+ hprof files that may take hours to download).
+     *
+     * Strategy:
+     * - Check every 10 seconds
+     * - Require 3 consecutive stable checks (30 seconds of no size change)
+     * - Maximum wait time: 6 hours (2160 attempts × 10 seconds)
      */
     private void waitForFileStable(Path filePath) {
         try {
             long lastSize = -1;
             int stableCount = 0;
-            int maxAttempts = 120; // 120 * 500ms = 60 seconds max wait
+            // Check every 10 seconds, up to 2160 times = 6 hours max wait
+            // This accommodates very large file downloads (e.g. 80GB+ hprof)
+            int checkIntervalMs = 10_000;
+            int maxAttempts = 2160;
+            int requiredStableChecks = 3; // Need 3 consecutive stable checks (30 seconds stable)
 
             for (int i = 0; i < maxAttempts; i++) {
                 if (!Files.exists(filePath)) {
@@ -142,10 +164,21 @@ public class LocalDumpFilesScanner extends ConfigurationAccessor {
                 }
 
                 long currentSize = Files.size(filePath);
-                if (currentSize == lastSize) {
+
+                // File size is 0, likely just created and not yet written to
+                if (currentSize == 0 && i < maxAttempts - 1) {
+                    lastSize = 0;
+                    stableCount = 0;
+                    Thread.sleep(checkIntervalMs);
+                    continue;
+                }
+
+                if (currentSize == lastSize && currentSize > 0) {
                     stableCount++;
-                    if (stableCount >= 2) {
-                        // File size hasn't changed for 2 consecutive checks
+                    if (stableCount >= requiredStableChecks) {
+                        log.info("File {} stabilized at size {} bytes ({} MB) after ~{} seconds",
+                                 filePath.getFileName(), currentSize, currentSize / (1024 * 1024),
+                                 (long) i * checkIntervalMs / 1000);
                         return;
                     }
                 } else {
@@ -153,14 +186,23 @@ public class LocalDumpFilesScanner extends ConfigurationAccessor {
                 }
 
                 lastSize = currentSize;
-                Thread.sleep(500); // Wait 500ms between checks
+                Thread.sleep(checkIntervalMs);
+
+                // Periodic progress logging (every ~5 minutes)
+                if (i > 0 && i % 30 == 0) {
+                    log.info("Still waiting for file {} to stabilize: current size {} bytes ({} MB), " +
+                             "elapsed ~{} minutes",
+                             filePath.getFileName(), currentSize, currentSize / (1024 * 1024),
+                             (long) i * checkIntervalMs / 60000);
+                }
             }
 
-            log.warn("File may still be being written after {} seconds: {}", maxAttempts * 0.5, filePath);
+            log.warn("File {} may still be being written after {} hours (current size: {} bytes)",
+                     filePath.getFileName(), (long) maxAttempts * checkIntervalMs / 3600000, lastSize);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (IOException e) {
-            log.warn("Failed to check file size: {}", e.getMessage());
+            log.warn("Failed to check file size for {}: {}", filePath, e.getMessage());
         }
     }
 
