@@ -335,12 +335,14 @@ public class StorageServiceImpl extends ConfigurationAccessor implements Storage
 
     private void transferByURL(FileTransferRequest request, Path destination, FileTransferListener listener) throws IOException {
         URLConnection conn = new java.net.URL(request.getUrl()).openConnection();
+        conn.setConnectTimeout(60_000);  // 连接超时60秒
+        conn.setReadTimeout(300_000);    // 读取超时5分钟（大文件需要较长时间）
         listener.fireTotalSize(Math.max(conn.getContentLengthLong(), 0));
         try (InputStream in = conn.getInputStream();
              OutputStream out = new FileOutputStream(destination.toFile())) {
             byte[] buffer = new byte[8192];
             int length;
-            int transferredSize = 0;
+            long transferredSize = 0;
             while ((length = in.read(buffer)) > 0) {
                 out.write(buffer, 0, length);
                 transferredSize += length;
