@@ -65,8 +65,10 @@ import org.eclipse.mat.snapshot.model.IObject;
 import org.eclipse.mat.snapshot.model.IObjectArray;
 import org.eclipse.mat.snapshot.model.IPrimitiveArray;
 import org.eclipse.mat.snapshot.model.ObjectReference;
+import org.eclipse.mat.snapshot.model.PrettyPrinter;
 import org.eclipse.mat.snapshot.query.Icons;
 import org.eclipse.mat.snapshot.query.SnapshotQuery;
+import org.eclipse.mat.snapshot.registry.ClassSpecificNameResolverRegistry;
 
 import java.lang.ref.Cleaner;
 import java.lang.ref.SoftReference;
@@ -126,6 +128,13 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
         this.cleaner = CLEANER.register(this, () -> $(() -> SnapshotFactory.dispose(context.snapshot)));
     }
 
+    /**
+     * Maximum character limit for string representation of objects.
+     * MAT defaults to 1024 which truncates long strings (e.g. large JSON values).
+     * This only controls the upper bound; actual memory usage depends on the real string length.
+     */
+    private static final int MAX_STRING_LENGTH = 50 * 1024 * 1024;
+
     static {
         try {
             java.lang.reflect.Field field = SnapshotFactory.class.getDeclaredField("factory");
@@ -137,6 +146,15 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
         } catch (Throwable t) {
             throw new AnalysisException(t);
         }
+
+        // Override MAT's default StringResolver (which hard-codes a 1024 character limit)
+        // to use a much larger limit, preventing truncation of long string values.
+        ClassSpecificNameResolverRegistry.registerResolver("java.lang.String",
+                object -> PrettyPrinter.objectAsString(object, MAX_STRING_LENGTH));
+        ClassSpecificNameResolverRegistry.registerResolver("java.lang.StringBuilder",
+                object -> PrettyPrinter.objectAsString(object, MAX_STRING_LENGTH));
+        ClassSpecificNameResolverRegistry.registerResolver("java.lang.StringBuffer",
+                object -> PrettyPrinter.objectAsString(object, MAX_STRING_LENGTH));
     }
 
     public static int typeOf(IObject object) {
@@ -382,8 +400,50 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
     }
 
     private String getObjectValue(IObject o) {
-        String text = o.getClassSpecificName();
+        String text = resolveFullString(o);
         return text != null ? EscapeUtil.unescapeJava(text) : o.getTechnicalName();
+    }
+
+    /**
+     * Resolve the full string representation of an object, bypassing MAT's 1024 char truncation.
+     * For java.lang.String/StringBuilder/StringBuffer, directly calls PrettyPrinter with a larger limit.
+     * For byte[]/char[] primitive arrays, reads the full array content.
+     * For other types, falls back to getClassSpecificName().
+     */
+    private static String resolveFullString(IObject o) {
+        try {
+            String className = o.getClazz().getName();
+            if ("java.lang.String".equals(className)
+                    || "java.lang.StringBuilder".equals(className)
+                    || "java.lang.StringBuffer".equals(className)) {
+                return PrettyPrinter.objectAsString(o, MAX_STRING_LENGTH);
+            }
+            if (o instanceof IPrimitiveArray) {
+                IPrimitiveArray pa = (IPrimitiveArray) o;
+                int len = Math.min(pa.getLength(), MAX_STRING_LENGTH);
+                if (pa.getType() == IObject.Type.BYTE) {
+                    Object valueObj = pa.getValueArray(0, len);
+                    if (valueObj instanceof byte[]) {
+                        byte[] bytes = (byte[]) valueObj;
+                        StringBuilder sb = new StringBuilder(bytes.length);
+                        for (byte b : bytes) {
+                            char c = (char) (b & 0xFF);
+                            if (c >= 32 && c <= 126) {
+                                sb.append(c);
+                            } else {
+                                sb.append('.');
+                            }
+                        }
+                        return sb.toString();
+                    }
+                } else if (pa.getType() == IObject.Type.CHAR) {
+                    return PrettyPrinter.arrayAsString(pa, 0, len, len);
+                }
+            }
+        } catch (SnapshotException e) {
+            // fall through
+        }
+        return o.getClassSpecificName();
     }
 
     private PageView<Model.FieldView> buildPageViewOfFields(List<Field> fields, int page, int pageSize) {
@@ -494,7 +554,7 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
     public String getObjectValue(int objectId) {
         return $(() -> {
             IObject object = context.snapshot.getObject(objectId);
-            String text = object.getClassSpecificName();
+            String text = resolveFullString(object);
             return text != null ? EscapeUtil.unescapeJava(text) : EMPTY_STRING;
         });
     }
@@ -1268,8 +1328,12 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
                             List<Object> l = new ArrayList<>();
                             for (int i = 0; i < columns.length; i++) {
                                 Object columnValue = table.getColumnValue(o, i);
-
-                                l.add(columnValue != null ? EscapeUtil.unescapeJava(columnValue.toString()) : null);
+                                if (columnValue instanceof IObject) {
+                                    String resolved = resolveFullString((IObject) columnValue);
+                                    l.add(resolved != null ? EscapeUtil.unescapeJava(resolved) : null);
+                                } else {
+                                    l.add(columnValue != null ? EscapeUtil.unescapeJava(columnValue.toString()) : null);
+                                }
                             }
                             IContextObject co = table.getContext(o);
                             return new CalciteSQLResult.TableResult.Entry(co != null ? co.getObjectId() : Helper.ILLEGAL_OBJECT_ID,
@@ -1337,8 +1401,12 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
                             List<Object> l = new ArrayList<>();
                             for (int i = 0; i < columns.length; i++) {
                                 Object columnValue = table.getColumnValue(o, i);
-
-                                l.add(columnValue != null ? columnValue.toString() : null);
+                                if (columnValue instanceof IObject) {
+                                    String resolved = resolveFullString((IObject) columnValue);
+                                    l.add(resolved != null ? resolved : columnValue.toString());
+                                } else {
+                                    l.add(columnValue != null ? columnValue.toString() : null);
+                                }
                             }
                             IContextObject co = table.getContext(o);
                             return new OQLResult.TableResult.Entry(co != null ? co.getObjectId() : Helper.ILLEGAL_OBJECT_ID,
