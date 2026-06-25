@@ -153,12 +153,18 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
 
         // Override MAT's default StringResolver (which hard-codes a 1024 character limit)
         // to use a much larger limit, preventing truncation of long string values.
-        ClassSpecificNameResolverRegistry.registerResolver("java.lang.String",
-                object -> PrettyPrinter.objectAsString(object, MAX_STRING_LENGTH));
-        ClassSpecificNameResolverRegistry.registerResolver("java.lang.StringBuilder",
-                object -> PrettyPrinter.objectAsString(object, MAX_STRING_LENGTH));
-        ClassSpecificNameResolverRegistry.registerResolver("java.lang.StringBuffer",
-                object -> PrettyPrinter.objectAsString(object, MAX_STRING_LENGTH));
+        // registerResolver is deprecated in MAT 1.16 (new API requires OSGi extension point),
+        // but there is no equivalent non-deprecated API callable outside the OSGi bundle.
+        @SuppressWarnings("deprecation")
+        Runnable registerResolvers = () -> {
+            ClassSpecificNameResolverRegistry.registerResolver("java.lang.String",
+                    object -> PrettyPrinter.objectAsString(object, MAX_STRING_LENGTH));
+            ClassSpecificNameResolverRegistry.registerResolver("java.lang.StringBuilder",
+                    object -> PrettyPrinter.objectAsString(object, MAX_STRING_LENGTH));
+            ClassSpecificNameResolverRegistry.registerResolver("java.lang.StringBuffer",
+                    object -> PrettyPrinter.objectAsString(object, MAX_STRING_LENGTH));
+        };
+        registerResolvers.run();
     }
 
     public static int typeOf(IObject object) {
