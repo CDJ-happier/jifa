@@ -184,6 +184,12 @@ public class HeapDumpAnalysisApiExecutor extends AbstractApiExecutor<HeapDumpAna
                 log.warn("Failed to delete index file: {}", index.getAbsolutePath());
             }
         }
+        File leakCache = new File(target + ".leakhunter.json");
+        if (leakCache.exists()) {
+            if (!leakCache.delete()) {
+                log.warn("Failed to delete leak report cache: {}", leakCache.getAbsolutePath());
+            }
+        }
     }
 
     @Override

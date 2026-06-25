@@ -89,6 +89,8 @@ public class AnalysisContext {
 
     static class LeakReportData {
         IResult result;
+        // Parsed report, populated either from disk cache or after building from result
+        org.eclipse.jifa.hda.api.Model.LeakReport report;
     }
 
     @Override
