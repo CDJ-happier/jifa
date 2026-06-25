@@ -1297,13 +1297,20 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
                 }
             }
             // Populate threadObjectId for each record from the matching slice.
-            // The slice objectId is the Thread object; the frontend uses it to fetch stacktraces
-            // when the user clicks mat://detail_result/Links links in the description.
+            // Only set it when the slice object is actually a Thread; non-Thread suspects
+            // (e.g. IndexShard) don't have a stacktrace and should not trigger the stacktrace link.
             if (report.getRecords() != null && report.getSlices() != null) {
                 Map<String, Integer> sliceObjectIdByName = new java.util.HashMap<>();
                 for (LeakReport.Slice slice : report.getSlices()) {
-                    if (slice.getLabel() != null) {
-                        sliceObjectIdByName.put(slice.getLabel(), slice.getObjectId());
+                    if (slice.getLabel() != null && slice.getObjectId() >= 0) {
+                        try {
+                            IObject obj = context.snapshot.getObject(slice.getObjectId());
+                            String className = obj.getClazz().getName();
+                            if (className.equals("java.lang.Thread") || className.endsWith(".Thread")) {
+                                sliceObjectIdByName.put(slice.getLabel(), slice.getObjectId());
+                            }
+                        } catch (Exception ignored) {
+                        }
                     }
                 }
                 for (LeakReport.Record rec : report.getRecords()) {
@@ -1524,7 +1531,13 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
             args.put("objects", Helper.buildHeapObjectArgument(new int[]{objectId}));
             IResultTree result = queryByCommand(context, "thread_overview", args);
 
+            if (result == null) {
+                return Collections.emptyList();
+            }
             List<?> elements = result.getElements();
+            if (elements == null || elements.isEmpty()) {
+                return Collections.emptyList();
+            }
 
             boolean includesMaxLocalRetained = (result.getColumns().length == 10);
 
