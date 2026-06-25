@@ -113,7 +113,7 @@ public abstract class AbstractApiExecutor<Analyzer> implements ApiExecutor {
                     ? CompletableFuture.completedFuture(this)
                     : buildAnalyzer(context.target(), Collections.emptyMap());
             return receiver.thenApplyAsync(r -> {
-                activeAnalyzers.computeIfAbsent(r, ignored -> new AtomicInteger(0)).incrementAndGet();
+                activeAnalyzers.computeIfAbsent(r, key -> new AtomicInteger(0)).incrementAndGet();
                 try {
                     return checkApiReturnValue(method.invoke(r, context.arguments()));
                 } catch (RuntimeException re) {
