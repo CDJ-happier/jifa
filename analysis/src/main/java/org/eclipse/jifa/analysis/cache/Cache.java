@@ -29,9 +29,8 @@ class Cache {
     Cache() {
         cache = CacheBuilder
                 .newBuilder()
-                .softValues()
                 .recordStats()
-                .expireAfterAccess(10, TimeUnit.MINUTES)
+                .expireAfterAccess(120, TimeUnit.MINUTES)
                 .build();
     }
 
