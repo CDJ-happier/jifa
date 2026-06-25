@@ -73,7 +73,9 @@ public class HeapDumpAnalysisApiExecutor extends AbstractApiExecutor<HeapDumpAna
                 "net.sf.cglib.transform",
                 "net.sf.cglib.transform.impl",
                 "net.sf.cglib.util",
-                "org.apache.commons.lang3"
+                "org.apache.commons.lang3",
+                "com.google.gson",
+                "com.google.gson.reflect"
         };
         config.put(Constants.FRAMEWORK_SYSTEMPACKAGES_EXTRA, String.join(",", extras));
         try {

@@ -12,6 +12,7 @@
  ********************************************************************************/
 package org.eclipse.jifa.hda.impl;
 
+import com.google.gson.Gson;
 import org.eclipse.jifa.analysis.cache.Cacheable;
 import org.eclipse.jifa.analysis.listener.ProgressListener;
 import org.eclipse.jifa.common.domain.exception.CommonException;
@@ -134,6 +135,8 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
      * This only controls the upper bound; actual memory usage depends on the real string length.
      */
     private static final int MAX_STRING_LENGTH = 50 * 1024 * 1024;
+
+    private static final Gson GSON = new Gson();
 
     static {
         try {
@@ -1194,7 +1197,7 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
                         if (cacheFile.exists()) {
                             try {
                                 String json = org.apache.commons.io.FileUtils.readFileToString(cacheFile, java.nio.charset.StandardCharsets.UTF_8);
-                                LeakReport cached = org.eclipse.jifa.common.util.GsonHolder.GSON.fromJson(json, LeakReport.class);
+                                LeakReport cached = GSON.fromJson(json, LeakReport.class);
                                 data = new AnalysisContext.LeakReportData();
                                 data.report = cached;
                                 context.leakReportData = data;
@@ -1288,7 +1291,7 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
             }
             // Persist to disk so restarts don't require re-running leakhunter
             try {
-                String json = org.eclipse.jifa.common.util.GsonHolder.GSON.toJson(report);
+                String json = GSON.toJson(report);
                 org.apache.commons.io.FileUtils.writeStringToFile(leakReportCacheFile(), json, java.nio.charset.StandardCharsets.UTF_8);
             } catch (Exception e) {
                 System.err.println("[jifa] Failed to persist leak report cache: " + e.getMessage());
