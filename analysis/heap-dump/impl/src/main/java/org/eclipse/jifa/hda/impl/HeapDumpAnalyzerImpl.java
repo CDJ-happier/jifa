@@ -2018,19 +2018,19 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
             IResultTree tree = queryByCommand(context, "dominator_tree -groupBy " + groupBy.name(), args);
             switch (groupBy) {
                 case NONE: {
-                    Object parent = Helper.fetchObjectInResultTree(tree, idPathInResultTree);
+                    Object parent = Helper.fetchObjectInResultTree(context, tree, idPathInResultTree);
                     return
                             buildDefaultItems(context.snapshot, tree, tree.getChildren(parent), ascendingOrder, sortBy,
                                               null, null, new PagingRequest(page, pageSize), parentObjectId);
                 }
                 case BY_CLASS: {
-                    Object object = Helper.fetchObjectInResultTree(tree, idPathInResultTree);
+                    Object object = Helper.fetchObjectInResultTree(context, tree, idPathInResultTree);
                     List<?> elements = object == null ? Collections.emptyList() : tree.getChildren(object);
                     return buildClassItems(context.snapshot, tree, elements, ascendingOrder, sortBy, null, null, new PagingRequest(page
                             , pageSize));
                 }
                 case BY_CLASSLOADER: {
-                    Object parent = Helper.fetchObjectInResultTree(tree, idPathInResultTree);
+                    Object parent = Helper.fetchObjectInResultTree(context, tree, idPathInResultTree);
                     List<?> children = tree.getChildren(parent);
 
                     if (children != null) {

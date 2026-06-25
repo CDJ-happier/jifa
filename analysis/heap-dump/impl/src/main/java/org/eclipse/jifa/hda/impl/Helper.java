@@ -24,8 +24,10 @@ import org.eclipse.mat.snapshot.query.IHeapObjectArgument;
 import org.eclipse.mat.util.IProgressListener;
 import org.eclipse.mat.util.VoidProgressListener;
 
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import static org.eclipse.jifa.common.Constant.EMPTY_STRING;
 
@@ -100,33 +102,84 @@ public class Helper {
         };
     }
 
-    private static Object findObjectInTree(IResultTree tree, List<?> levelElements, int targetId) {
-        if (levelElements != null) {
-            for (Object o : levelElements) {
-                if (tree.getContext(o).getObjectId() == targetId) {
-                    return o;
+    /**
+     * Build or retrieve a cached objectId → node index for a specific children list.
+     * Keyed by (tree identity, parentNode identity) so concurrent callers share the same index
+     * once it has been built once.
+     */
+    private static Map<Integer, Object> indexForChildren(AnalysisContext ctx,
+                                                          IResultTree tree,
+                                                          Object parentNode,
+                                                          List<?> elements) {
+        AnalysisContext.ChildrenKey key = new AnalysisContext.ChildrenKey(tree, parentNode);
+        return ctx.treeChildrenIndex.computeIfAbsent(key, k -> {
+            int capacity = elements == null ? 0 : (int) (elements.size() / 0.75f) + 1;
+            Map<Integer, Object> index = new HashMap<>(capacity);
+            if (elements != null) {
+                for (Object node : elements) {
+                    IContextObject c = tree.getContext(node);
+                    if (c != null) {
+                        index.put(c.getObjectId(), node);
+                    }
                 }
+            }
+            return index;
+        });
+    }
+
+    private static Object findObjectInTree(AnalysisContext ctx,
+                                            IResultTree tree,
+                                            Object parentNode,
+                                            List<?> elements,
+                                            int targetId) {
+        if (elements == null) {
+            return null;
+        }
+        if (ctx != null) {
+            return indexForChildren(ctx, tree, parentNode, elements).get(targetId);
+        }
+        // fallback: linear scan for callers without a context (GCRootPath trees are much smaller)
+        for (Object o : elements) {
+            IContextObject c = tree.getContext(o);
+            if (c != null && c.getObjectId() == targetId) {
+                return o;
             }
         }
         return null;
     }
 
+    /**
+     * Original signature kept for callers that have no AnalysisContext (e.g. GCRootPath).
+     * Uses linear scan — acceptable because those trees are far smaller than the dominator tree.
+     */
     public static Object fetchObjectInResultTree(IResultTree tree, int[] idPathInResultTree) {
+        return fetchObjectInResultTree(null, tree, idPathInResultTree);
+    }
+
+    /**
+     * Context-aware variant: uses a cached objectId index for O(1) lookup per level.
+     * The roots level of the dominator tree can have millions of entries; indexing eliminates
+     * the O(N) scan that previously made every child-expand request take minutes on large heaps.
+     */
+    public static Object fetchObjectInResultTree(AnalysisContext ctx,
+                                                  IResultTree tree,
+                                                  int[] idPathInResultTree) {
         if (idPathInResultTree == null || idPathInResultTree.length == 0) {
             return null;
         }
 
-        // find the object in root tree
-        Object objectInTree = findObjectInTree(tree, tree.getElements(), idPathInResultTree[0]);
+        List<?> roots = tree.getElements();
+        Object node = findObjectInTree(ctx, tree, null, roots, idPathInResultTree[0]);
 
-        // find the object in children tree
         for (int i = 1; i < idPathInResultTree.length; i++) {
-            if (objectInTree == null) {
+            if (node == null) {
                 return null;
             }
-            objectInTree = findObjectInTree(tree, tree.getChildren(objectInTree), idPathInResultTree[i]);
+            List<?> children = tree.getChildren(node);
+            Object parent = node;
+            node = findObjectInTree(ctx, tree, parent, children, idPathInResultTree[i]);
         }
 
-        return objectInTree;
+        return node;
     }
 }

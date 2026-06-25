@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class AnalysisContext {
 
@@ -37,8 +38,41 @@ public class AnalysisContext {
     // SoftReference would be cleared under GC pressure, forcing repeated expensive recomputation.
     volatile LeakReportData leakReportData;
 
+    // objectId index per cached IResultTree to speed up fetchObjectInResultTree from O(N) to O(1).
+    // Key: IResultTree instance (identity); Value: index from objectId → tree node for that level's elements.
+    // Only roots-level is indexed eagerly (it's the largest list); child levels are indexed on first access.
+    final ConcurrentHashMap<ChildrenKey, Map<Integer, Object>> treeChildrenIndex = new ConcurrentHashMap<>();
+
     AnalysisContext(ISnapshot snapshot) {
         this.snapshot = snapshot;
+    }
+
+    /**
+     * Key combining the IResultTree instance (by identity) and a parent tree node (by identity),
+     * identifying one specific children list within a tree.
+     * Uses null parentNode to represent the roots list.
+     */
+    static final class ChildrenKey {
+        final IResultTree tree;
+        final Object parentNode; // null means roots
+
+        ChildrenKey(IResultTree tree, Object parentNode) {
+            this.tree = tree;
+            this.parentNode = parentNode;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof ChildrenKey)) return false;
+            ChildrenKey k = (ChildrenKey) o;
+            return tree == k.tree && parentNode == k.parentNode;
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(tree) * 31 + System.identityHashCode(parentNode);
+        }
     }
 
     static class ClassLoaderExplorerData {
