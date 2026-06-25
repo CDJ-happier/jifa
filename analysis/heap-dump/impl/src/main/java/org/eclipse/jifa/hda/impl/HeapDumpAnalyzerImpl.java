@@ -1296,6 +1296,23 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
                     }
                 }
             }
+            // Populate threadObjectId for each record from the matching slice.
+            // The slice objectId is the Thread object; the frontend uses it to fetch stacktraces
+            // when the user clicks mat://detail_result/Links links in the description.
+            if (report.getRecords() != null && report.getSlices() != null) {
+                Map<String, Integer> sliceObjectIdByName = new java.util.HashMap<>();
+                for (LeakReport.Slice slice : report.getSlices()) {
+                    if (slice.getLabel() != null) {
+                        sliceObjectIdByName.put(slice.getLabel(), slice.getObjectId());
+                    }
+                }
+                for (LeakReport.Record rec : report.getRecords()) {
+                    Integer tid = sliceObjectIdByName.get(rec.getName());
+                    if (tid != null) {
+                        rec.setThreadObjectId(tid);
+                    }
+                }
+            }
             // Persist to disk so restarts don't require re-running leakhunter
             try {
                 String json = GSON.toJson(report);

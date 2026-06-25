@@ -859,6 +859,10 @@ public interface Model {
             public int index;
 
             public List<ShortestPath> paths;
+
+            // objectId of the Thread object associated with this suspect, -1 if not thread-related.
+            // Used by the frontend to resolve mat://detail_result/Links links into stacktrace requests.
+            public int threadObjectId = -1;
         }
 
         @Data

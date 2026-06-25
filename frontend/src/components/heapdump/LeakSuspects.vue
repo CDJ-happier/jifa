@@ -26,6 +26,12 @@ const names = ref();
 const loading = ref(true);
 const noData = ref(false);
 
+// Stacktrace dialog state
+const stacktraceVisible = ref(false);
+const stacktraceLoading = ref(false);
+const stacktraceFrames = ref<any[]>([]);
+const stacktraceTitle = ref('');
+
 function onClick(id) {
   selectedObjectId.value = id;
 }
@@ -33,12 +39,48 @@ function onClick(id) {
 interface Record {
   desc: any;
   paths?: any;
+  threadObjectId?: number;
 }
 
 interface Report {
   useful: boolean;
   records?: Record[];
   slices?: any[];
+}
+
+// Replace mat://detail_result/Links%2F0|1 with clickable spans, keyed by record index.
+// Links/0 = stacktrace, Links/1 = stacktrace with local variables (shown the same way here).
+function processDesc(desc: string, recordIndex: number): string {
+  return desc.replace(
+    /href="mat:\/\/detail_result\/Links%2F(\d+)"/g,
+    (_, linkIndex) =>
+      `href="javascript:void(0)" data-leak-link="${recordIndex}:${linkIndex}" style="cursor:pointer"`
+  );
+}
+
+function handleDescClick(event: MouseEvent, record: Record) {
+  const target = event.target as HTMLElement;
+  const link = target.closest('[data-leak-link]');
+  if (!link) return;
+  const [, ] = (link.getAttribute('data-leak-link') || '').split(':');
+  const threadId = record.threadObjectId ?? -1;
+  if (threadId < 0) return;
+  showStacktrace(threadId, record);
+}
+
+async function showStacktrace(objectId: number, record: Record) {
+  stacktraceVisible.value = true;
+  stacktraceLoading.value = true;
+  stacktraceTitle.value = record.name;
+  stacktraceFrames.value = [];
+  try {
+    const frames = await request('stackTrace', { objectId });
+    stacktraceFrames.value = frames || [];
+  } catch {
+    stacktraceFrames.value = [];
+  } finally {
+    stacktraceLoading.value = false;
+  }
 }
 
 onMounted(() => {
@@ -64,10 +106,10 @@ onMounted(() => {
 <template>
   <el-scrollbar v-loading="loading" v-if="!noData">
     <el-collapse v-if="names" v-model="names" style="width: 100%">
-      <el-collapse-item v-for="record in records" :title="record.name" :name="record.name">
+      <el-collapse-item v-for="(record, idx) in records" :title="record.name" :name="record.name">
         <el-tabs tab-position="left">
           <el-tab-pane :label="t('common.description')">
-            <div v-html="record.desc"></div>
+            <div v-html="processDesc(record.desc, idx)" @click="handleDescClick($event, record)"></div>
           </el-tab-pane>
           <el-tab-pane :label="t('common.detail')" v-if="record.paths">
             <el-tree
@@ -99,6 +141,20 @@ onMounted(() => {
   >
     <el-empty :image-size="200" :description="t('common.noData')" />
   </div>
+
+  <!-- Stacktrace dialog -->
+  <el-dialog v-model="stacktraceVisible" :title="stacktraceTitle + ' - Stack Trace'" width="70%" top="5vh">
+    <div v-loading="stacktraceLoading" style="min-height: 100px;">
+      <el-empty v-if="!stacktraceLoading && stacktraceFrames.length === 0" description="No stack trace available" :image-size="60" />
+      <el-table v-else :data="stacktraceFrames" stripe size="small" style="width:100%">
+        <el-table-column type="index" width="50" />
+        <el-table-column prop="stack" label="Frame" show-overflow-tooltip />
+        <el-table-column prop="maxLocalRetained" label="Max Local Retained" width="160" align="right">
+          <template #default="{ row }">{{ row.maxLocalRetained > 0 ? prettySize(row.maxLocalRetained) : '' }}</template>
+        </el-table-column>
+      </el-table>
+    </div>
+  </el-dialog>
 </template>
 <style scoped>
 .ej-tree-node {
