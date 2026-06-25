@@ -57,6 +57,17 @@ function byStomp(resolve: (req: Requester) => void) {
     reconnectDelay: 5000
   });
 
+  function resetConnection() {
+    // Reject all pending requests so callers don't hang indefinitely, then reset
+    // the module-level promise so the next request creates a fresh connection.
+    resRejMap.forEach((resRej) => resRej.reject({ errorCode: 'CONNECTION_LOST' }));
+    resRejMap.clear();
+    rp = undefined;
+  }
+
+  client.onDisconnect = resetConnection;
+  client.onStompError = resetConnection;
+
   let subscriptionReceipt = uuidv4();
   let requestId = 1;
 

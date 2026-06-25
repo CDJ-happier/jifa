@@ -33,7 +33,9 @@ public class AnalysisContext {
 
     volatile SoftReference<DirectByteBufferData> directByteBufferData = new SoftReference<>(null);
 
-    volatile SoftReference<LeakReportData> leakReportData= new SoftReference<>(null);
+    // Strong reference: leakhunter takes minutes to compute on large heap dumps.
+    // SoftReference would be cleared under GC pressure, forcing repeated expensive recomputation.
+    volatile LeakReportData leakReportData;
 
     AnalysisContext(ISnapshot snapshot) {
         this.snapshot = snapshot;

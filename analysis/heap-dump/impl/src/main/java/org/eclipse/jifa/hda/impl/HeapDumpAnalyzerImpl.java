@@ -1184,15 +1184,15 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
     @Override
     public LeakReport getLeakReport() {
         return $(() -> {
-            AnalysisContext.LeakReportData data = context.leakReportData.get();
+            AnalysisContext.LeakReportData data = context.leakReportData;
             if (data == null) {
                 synchronized (context) {
-                    data = context.leakReportData.get();
+                    data = context.leakReportData;
                     if (data == null) {
                         IResult result = queryByCommand(context, "leakhunter");
                         data = new AnalysisContext.LeakReportData();
                         data.result = result;
-                        context.leakReportData = new SoftReference<>(data);
+                        context.leakReportData = data;
                     }
                 }
             }

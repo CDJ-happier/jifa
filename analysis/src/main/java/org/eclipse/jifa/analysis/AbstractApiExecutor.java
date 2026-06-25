@@ -51,6 +51,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.eclipse.jifa.analysis.enums.AnalysisErrorCode.FILE_NOT_FOUND;
 import static org.eclipse.jifa.analysis.listener.ProgressListener.NoOpProgressListener;
@@ -65,6 +66,11 @@ public abstract class AbstractApiExecutor<Analyzer> implements ApiExecutor {
     private final Set<String> predefinedApiNames = new HashSet<>();
 
     private final Map<ExecutionContext, CompletableFuture<?>> activeContext = new ConcurrentHashMap<>();
+
+    // Reference-counted strong references to analyzers with active requests.
+    // Prevents Caffeine's softValues GC from disposing the snapshot mid-execution.
+    // Uses a count because multiple concurrent requests can share the same analyzer instance.
+    private final ConcurrentHashMap<Object, AtomicInteger> activeAnalyzers = new ConcurrentHashMap<>();
 
     private final Map<Path, CompletableFuture<Analyzer>> buildingAnalyzer = new ConcurrentHashMap<>();
 
@@ -107,6 +113,7 @@ public abstract class AbstractApiExecutor<Analyzer> implements ApiExecutor {
                     ? CompletableFuture.completedFuture(this)
                     : buildAnalyzer(context.target(), Collections.emptyMap());
             return receiver.thenApplyAsync(r -> {
+                activeAnalyzers.computeIfAbsent(r, ignored -> new AtomicInteger(0)).incrementAndGet();
                 try {
                     return checkApiReturnValue(method.invoke(r, context.arguments()));
                 } catch (RuntimeException re) {
@@ -114,6 +121,7 @@ public abstract class AbstractApiExecutor<Analyzer> implements ApiExecutor {
                 } catch (Throwable t) {
                     throw new CompletionException(t);
                 } finally {
+                    activeAnalyzers.computeIfPresent(r, (k, count) -> count.decrementAndGet() > 0 ? count : null);
                     activeContext.remove(context);
                 }
             }, executor);

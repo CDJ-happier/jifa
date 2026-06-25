@@ -192,6 +192,11 @@ public class HeapDumpAnalysisApiExecutor extends AbstractApiExecutor<HeapDumpAna
     }
 
     @Override
+    protected int getCacheDuration() {
+        return 120;
+    }
+
+    @Override
     protected HeapDumpAnalyzer buildAnalyzer(Path target, Map<String, String> options, ProgressListener listener) {
         return PROVIDER.provide(target, options, listener);
     }

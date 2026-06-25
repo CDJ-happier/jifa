@@ -55,6 +55,9 @@ onMounted(() => {
       noData.value = true;
     }
     loading.value = false;
+  }).catch(() => {
+    loading.value = false;
+    noData.value = true;
   });
 });
 </script>
