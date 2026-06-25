@@ -1197,7 +1197,7 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
                         java.io.File cacheFile = leakReportCacheFile();
                         if (cacheFile.exists()) {
                             try {
-                                String json = org.apache.commons.io.FileUtils.readFileToString(cacheFile, java.nio.charset.StandardCharsets.UTF_8);
+                                String json = new String(java.nio.file.Files.readAllBytes(cacheFile.toPath()), java.nio.charset.StandardCharsets.UTF_8);
                                 LeakReport cached = GSON.fromJson(json, LeakReport.class);
                                 data = new AnalysisContext.LeakReportData();
                                 data.report = cached;
@@ -1293,7 +1293,7 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
             // Persist to disk so restarts don't require re-running leakhunter
             try {
                 String json = GSON.toJson(report);
-                org.apache.commons.io.FileUtils.writeStringToFile(leakReportCacheFile(), json, java.nio.charset.StandardCharsets.UTF_8);
+                java.nio.file.Files.write(leakReportCacheFile().toPath(), json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             } catch (Exception e) {
                 System.err.println("[jifa] Failed to persist leak report cache: " + e.getMessage());
             }
