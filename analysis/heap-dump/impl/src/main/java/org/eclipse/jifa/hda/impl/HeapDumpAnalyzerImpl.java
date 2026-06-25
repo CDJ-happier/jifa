@@ -85,6 +85,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.concurrent.ConcurrentHashMap;
@@ -1918,6 +1919,43 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
                                                                   boolean ascendingOrder, String sortBy,
                                                                   String searchText, SearchType searchType,
                                                                   PagingRequest pagingRequest, int parentObjectId) {
+        // When elements are large and there is no search filter, use a bounded priority queue (Top-K)
+        // instead of sorting all N elements.  This brings complexity from O(N log N) to O(N log K)
+        // where K = (page * pageSize), which is typically very small (e.g. 20-100).
+        boolean hasFilter = searchText != null && !searchText.isEmpty();
+        int neededUpTo = pagingRequest.from() + pagingRequest.getPageSize(); // items needed for this page
+
+        if (!hasFilter && elements.size() > neededUpTo * 2) {
+            Comparator<DominatorTree.DefaultItem> cmp = DominatorTree.DefaultItem.sortBy(sortBy, ascendingOrder);
+            // Min-heap of size K: keeps the K largest elements seen so far (reversed comparator)
+            Comparator<DominatorTree.DefaultItem> heapCmp = cmp.reversed();
+            PriorityQueue<DominatorTree.DefaultItem> heap = new PriorityQueue<>(neededUpTo + 1, heapCmp);
+
+            int totalCount = 0;
+            for (Object e : elements) {
+                DominatorTree.DefaultItem item = $(() -> new VirtualDefaultItem(snapshot, tree, e, parentObjectId));
+                totalCount++;
+                if (heap.size() < neededUpTo) {
+                    heap.offer(item);
+                } else if (cmp.compare(item, heap.peek()) < 0) {
+                    // item is "better" (ranks higher) than the worst in heap
+                    heap.poll();
+                    heap.offer(item);
+                }
+            }
+
+            // heap contains top neededUpTo items in min-heap order; sort them properly
+            List<DominatorTree.DefaultItem> topItems = new ArrayList<>(heap);
+            topItems.sort(cmp);
+
+            int from = pagingRequest.from();
+            List<DominatorTree.DefaultItem> page = topItems.subList(
+                    Math.min(from, topItems.size()),
+                    Math.min(neededUpTo, topItems.size()));
+            return new PageView<>(pagingRequest, totalCount, page);
+        }
+
+        // Default path: full sort (used when filter is active or list is small)
         final AtomicInteger afterFilterCount = new AtomicInteger(0);
         List<DominatorTree.DefaultItem> items = elements.stream()
                                                         .map(e -> $(() -> new VirtualDefaultItem(snapshot, tree, e, parentObjectId)))
@@ -2022,8 +2060,9 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
             switch (groupBy) {
                 case NONE: {
                     Object parent = Helper.fetchObjectInResultTree(context, tree, idPathInResultTree);
-                    return
-                            buildDefaultItems(context.snapshot, tree, tree.getChildren(parent), ascendingOrder, sortBy,
+                    List<?> children = parent == null ? Collections.emptyList() : tree.getChildren(parent);
+                    if (children == null) children = Collections.emptyList();
+                    return buildDefaultItems(context.snapshot, tree, children, ascendingOrder, sortBy,
                                               null, null, new PagingRequest(page, pageSize), parentObjectId);
                 }
                 case BY_CLASS: {
@@ -2034,7 +2073,7 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
                 }
                 case BY_CLASSLOADER: {
                     Object parent = Helper.fetchObjectInResultTree(context, tree, idPathInResultTree);
-                    List<?> children = tree.getChildren(parent);
+                    List<?> children = parent == null ? null : tree.getChildren(parent);
 
                     if (children != null) {
                         return buildClassLoaderItems(context.snapshot, tree, children, ascendingOrder, sortBy, null,
