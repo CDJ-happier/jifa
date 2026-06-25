@@ -30,7 +30,7 @@ class Cache {
         cache = CacheBuilder
                 .newBuilder()
                 .recordStats()
-                .expireAfterAccess(120, TimeUnit.MINUTES)
+                .expireAfterAccess(240, TimeUnit.MINUTES)
                 .build();
     }
 
@@ -61,13 +61,37 @@ class Cache {
             if (o == null || getClass() != o.getClass())
                 return false;
             CacheKey cacheKey = (CacheKey) o;
-            return method.equals(cacheKey.method) && Arrays.equals(args, cacheKey.args);
+            return method.equals(cacheKey.method) && deepEquals(args, cacheKey.args);
         }
 
         @Override
         public int hashCode() {
             int hash = method.hashCode();
-            return hash * 31 ^ Arrays.hashCode(args);
+            return hash * 31 ^ deepHashCode(args);
+        }
+
+        // Arrays.equals(Object[]) uses .equals() on each element, which for arrays like int[]
+        // is identity comparison.  Use Arrays.deepEquals/deepHashCode instead to correctly
+        // handle nested arrays as cache key components.
+        private static boolean deepEquals(Object[] a, Object[] b) {
+            if (a == b) return true;
+            if (a == null || b == null || a.length != b.length) return false;
+            for (int i = 0; i < a.length; i++) {
+                Object ai = a[i], bi = b[i];
+                if (ai == bi) continue;
+                if (ai == null || bi == null) return false;
+                // Handle primitive arrays (int[], long[], etc.)
+                if (ai.getClass().isArray() && bi.getClass().isArray()) {
+                    if (!Arrays.deepEquals(new Object[]{ai}, new Object[]{bi})) return false;
+                } else if (!ai.equals(bi)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static int deepHashCode(Object[] args) {
+            return Arrays.deepHashCode(args);
         }
     }
 }

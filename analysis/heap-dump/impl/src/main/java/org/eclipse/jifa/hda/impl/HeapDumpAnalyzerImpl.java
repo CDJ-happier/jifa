@@ -2026,6 +2026,7 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
     }
 
     @Override
+    @Cacheable
     public PageView<? extends DominatorTree.Item> getRootsOfDominatorTree(DominatorTree.Grouping groupBy, String sortBy,
                                                                           boolean ascendingOrder, String searchText,
                                                                           SearchType searchType, int page,
@@ -2055,6 +2056,7 @@ public class HeapDumpAnalyzerImpl implements HeapDumpAnalyzer {
     }
 
     @Override
+    @Cacheable
     public PageView<? extends DominatorTree.Item> getChildrenOfDominatorTree(DominatorTree.Grouping groupBy,
                                                                              String sortBy, boolean ascendingOrder,
                                                                              int parentObjectId,
